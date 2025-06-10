@@ -12,6 +12,12 @@ export class Player {
   @Column({ default: 0 })
   mmr: number;
 
+  @Column()
+  steamName: string;
+
+  @Column()
+  avatarURL: string;
+
   @OneToMany(() => MatchDetail, (matchDetail) => matchDetail.player)
   matchDetails: MatchDetail[];
 }
