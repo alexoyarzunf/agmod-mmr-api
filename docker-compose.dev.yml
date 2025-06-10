@@ -1,0 +1,53 @@
+services:
+  mariadb:
+    image: mariadb:lts
+    environment:
+      MARIADB_USER: ${DB_USERNAME}
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+      MARIADB_DATABASE: ${DB_DATABASE}
+      MARIADB_HOST: ${DB_HOST}
+      MARIADB_PORT: ${DB_PORT}
+      MYSQL_TCP_PORT: ${DB_PORT}
+      MARIADB_ROOT_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--innodb_initialized"]
+      start_period: 5s
+      timeout: 5s
+      interval: 5s
+      retries: 10
+    # Uncomment to expose the port to the host machine
+    #ports:
+    #- ${DB_PORT}:${DB_PORT}
+
+  api:
+    build:
+      dockerfile: Dockerfile
+      context: .
+      target: development
+    #depends_on:
+      #mariadb:
+        #condition: service_healthy
+    tty: true
+    command: ['/bin/sh', '/usr/src/app/scripts/start-dev.sh']
+    environment:
+      - API_PORT=${API_PORT}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_USERNAME=${DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_DATABASE=${DB_DATABASE}
+      - DB_SYNCHRONIZE=${DB_SYNCHRONIZE}
+    volumes:
+      - /usr/src/app/node_modules
+      - .:/usr/src/app
+    ports:
+      - ${API_PORT}:${API_PORT}
+
+volumes:
+  db-data:
+
+networks:
+  default:
+    name: agmod-mmr-next-network
