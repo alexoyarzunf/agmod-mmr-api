@@ -29,4 +29,4 @@ docker-prod-logs:
 	docker compose -f docker-compose.dev.yml logs
 
 docker-run-migrations:
-	docker exec -it -w /usr/src/app agdb_api-api-1 yarn migration:run
+	docker exec -it -w /usr/src/app agmod-mmr-api-api-1 yarn migration:run
