@@ -32,10 +32,17 @@ export class PlayersService {
     });
   }
 
-  async getPlayerBySteamID(steamID: string): Promise<PlayerResponseDto | null> {
+  async getPlayerByID(id: number): Promise<PlayerResponseDto | null> {
     const player = await this.playersRepository.findOne({
-      where: { steamID },
+      where: { id },
       relations: ['matchDetails', 'matchDetails.match'],
+      order: {
+        matchDetails: {
+          match: {
+            matchDate: 'DESC',
+          },
+        },
+      },
     });
 
     if (!player) {
@@ -55,11 +62,15 @@ export class PlayersService {
         damageTaken: detail.damageTaken,
         model: detail.model,
       },
+      mmrAfterMatch: detail.mmrAfterMatch,
+      mmrDelta: detail.mmrDelta,
     }));
 
     return {
       id: player.id,
       steamID: player.steamID,
+      steamName: player.steamName,
+      avatarURL: player.avatarURL,
       mmr: player.mmr,
       matchHistory,
     };

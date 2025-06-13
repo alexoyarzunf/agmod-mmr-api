@@ -23,9 +23,9 @@ export class PlayersController {
     return await this.playersService.getLeaderboard(parsedLimit, parsedPage);
   }
 
-  @Get(':steamID')
-  async getPlayerBySteamID(@Param('steamID') steamID: string): Promise<any> {
-    return await this.playersService.getPlayerBySteamID(steamID);
+  @Get(':id')
+  async getPlayerBySteamID(@Param('id') id: number): Promise<any> {
+    return await this.playersService.getPlayerByID(id);
   }
 
   @Post()
