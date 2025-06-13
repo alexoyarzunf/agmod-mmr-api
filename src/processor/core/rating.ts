@@ -32,14 +32,14 @@ export function calculateSkillProxy(matchDetail: MatchDetail): number {
  */
 export function calculateInitialRating(skillProxy: number): Rating {
   // Higher base rating to avoid negative MMRs
-  const baseRating = 35; // Increased from 25 to 35
+  const baseRating = 18;
   // Adjustment based on skill proxy: +/-8 points
-  const adjustment = (skillProxy - 1) * 8; // skillProxy between 0-2, adjustment between -8 and +8
+  const adjustment = (skillProxy - 1) * 2; // skillProxy between 0-2, adjustment between -2 and +2
 
-  const initialMu = Math.max(25, Math.min(50, baseRating + adjustment));
+  const initialMu = Math.max(10, Math.min(25, baseRating + adjustment));
 
-  // Lower sigma for new players for higher initial MMRs
-  const initialSigma = 6.0; // Reduced from 8.33 to 6.0
+  // Higher sigma for new players for lower initial MMRs
+  const initialSigma = 9.5;
 
   return rating({ mu: initialMu, sigma: initialSigma });
 }
@@ -59,7 +59,7 @@ export function calculateInitialMMR(
   playerPerformance: PlayerPerformance,
 ): number {
   // Scaled MMR base value
-  const baseMMR = 700; // System midpoint
+  const baseMMR = 250; // System midpoint
 
   const kd = matchDetail.frags - matchDetail.deaths;
   const avgDamage =
@@ -67,14 +67,14 @@ export function calculateInitialMMR(
     matchDetails.length;
 
   // Calculate boost based on metrics (max +/-300 points)
-  const kdBoost = Math.max(-150, Math.min(150, (kd - 1.0) * 100)); // K/D above 1.0 gives boost
-  const damageBoost = Math.max(-75, Math.min(75, (avgDamage - 2500) / 50)); // Damage above 2500 gives boost
+  const kdBoost = Math.max(-20, Math.min(20, (kd - 1.0) * 10)); // K/D above 1.0 gives boost
+  const damageBoost = Math.max(-10, Math.min(10, (avgDamage - 2500) / 200)); // Damage above 2500 gives boost
 
   const performanceBoost = kdBoost + damageBoost;
 
   // Convert OpenSkill rating to MMR scale
-  const skillFactor = (rating.mu - 25) * 20; // Each mu point ≈ 20 MMR
-  const uncertaintyPenalty = rating.sigma * 10; // Penalty for uncertainty
+  const skillFactor = (rating.mu - 18) * 6; // Each mu point ≈ 6 MMR
+  const uncertaintyPenalty = rating.sigma * 7; // Penalty for uncertainty
 
   const scaledMMR =
     baseMMR +

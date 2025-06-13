@@ -57,8 +57,8 @@ export function calculatePerformanceAdjustment(
   playerPerformance: PlayerPerformance,
   isWinner: boolean,
 ): number {
-  // Adjustment range: -30 to +30 MMR based on performance
-  const baseAdjustment = (playerPerformance.score - 1.0) * 30; // -30 to +30 for performance 0.0-2.0
+  // Base adjustment: average performance (1.0) does not modify MMR, high/low score amplifies it.
+  const baseAdjustment = (playerPerformance.score - 1.0) * 90;
 
   // If your team won but you played poorly, reduce gain.
   // If your team lost but you played well, reduce loss.
@@ -66,10 +66,10 @@ export function calculatePerformanceAdjustment(
 
   if (isWinner) {
     // On win: bad performance reduces gain, good performance increases it
-    adjustment = Math.max(-15, Math.min(25, baseAdjustment));
+    adjustment = Math.max(-40, Math.min(70, baseAdjustment));
   } else {
     // On loss: good performance reduces loss, bad performance increases it
-    adjustment = Math.max(-25, Math.min(15, baseAdjustment));
+    adjustment = Math.max(-70, Math.min(40, baseAdjustment));
   }
 
   return adjustment;
