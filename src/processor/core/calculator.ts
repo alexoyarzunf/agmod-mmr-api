@@ -82,6 +82,7 @@ export class AGMMRCalculator {
         const performanceAdjustment = calculatePerformanceAdjustment(
           performance,
           isWinner,
+          team.length,
         );
         performance.adjustment = performanceAdjustment;
 

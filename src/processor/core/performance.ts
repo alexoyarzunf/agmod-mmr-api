@@ -51,25 +51,34 @@ export function calculateIndividualPerformance(
  * Calculates the MMR adjustment for a player based on their performance and match outcome.
  * @param playerPerformance - The player's performance object.
  * @param isWinner - Whether the player's team won.
+ * @param teamSize - The size of the team the player is on.
  * @returns MMR adjustment value.
  */
 export function calculatePerformanceAdjustment(
   playerPerformance: PlayerPerformance,
   isWinner: boolean,
+  teamSize: number,
 ): number {
-  // Base adjustment: average performance (1.0) does not modify MMR, high/low score amplifies it.
-  const baseAdjustment = (playerPerformance.score - 1.0) * 90;
+  const maxWin = Math.max(10, 70 - teamSize * 10);
+  const minWin = 0;
+  const maxLoss = 0;
+  const minLoss = Math.min(-10, -70 + teamSize * 10);
+
+  // Individual performance adjustment based on normalized score
+  // Score of 1.0 means average, above 1.0 is better, below is worse
+  const baseAdjustment =
+    ((playerPerformance.score - 1.0) * (maxWin - minLoss)) / 2;
 
   // If your team won but you played poorly, reduce gain.
   // If your team lost but you played well, reduce loss.
   let adjustment = baseAdjustment;
 
   if (isWinner) {
-    // On win: bad performance reduces gain, good performance increases it
-    adjustment = Math.max(-40, Math.min(70, baseAdjustment));
+    // On win: never lose MMR, only gain more or less depending on performance
+    adjustment = Math.max(minWin, Math.min(maxWin, baseAdjustment));
   } else {
-    // On loss: good performance reduces loss, bad performance increases it
-    adjustment = Math.max(-70, Math.min(40, baseAdjustment));
+    // Won loss: never gain MMR, only lose less or more depending on performance
+    adjustment = Math.max(minLoss, Math.min(maxLoss, baseAdjustment));
   }
 
   return adjustment;
