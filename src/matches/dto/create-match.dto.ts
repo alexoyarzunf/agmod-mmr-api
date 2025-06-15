@@ -14,10 +14,13 @@ export interface MatchExtendedResponseDto {
 
 export interface MatchDetailsResponseDto {
   playerId: number;
+  playerSteamName: string;
+  playerAvatarUrl: string;
   playerSteamID: string;
   frags: number;
   deaths: number;
   damageDealt: number;
   damageTaken: number;
   model: string;
+  mmrDelta: number;
 }

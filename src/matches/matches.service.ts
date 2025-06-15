@@ -33,13 +33,16 @@ export class MatchesService {
 
     const matchDetails = match.matchDetails.map((detail) => ({
       playerId: detail.player.id,
+      playerSteamName: detail.player.steamName,
       playerSteamID: detail.player.steamID,
+      playerAvatarUrl: detail.player.avatarURL,
       frags: detail.frags,
       deaths: detail.deaths,
       averagePing: detail.averagePing,
       damageDealt: detail.damageDealt,
       damageTaken: detail.damageTaken,
       model: detail.model,
+      mmrDelta: detail.mmrDelta,
     }));
 
     return {
