@@ -3,85 +3,133 @@ import { rating, Rating } from 'openskill';
 import { PlayerPerformance } from '../types/player-performance';
 
 /**
- * Rating utilities for skill proxy calculation, initial rating, and initial MMR.
+ * Rating System Module
+ *
+ * This module handles the initialization and calculation of player ratings and MMR.
+ * It provides utilities for:
+ * - Analyzing new player skill from their first match
+ * - Creating appropriate initial OpenSkill ratings
+ * - Calculating placement MMR for new players
+ *
+ * The system tries to place new players at appropriate skill levels quickly
+ * rather than forcing everyone to start from the bottom.
  */
 
 /**
- * Calculates a skill proxy value for a player based on their match stats.
- * @param matchDetail - The player's match detail.
- * @returns Skill proxy value (normalized).
+ * Analyzes a player's first match performance to estimate their skill level
+ *
+ * This function creates a "skill proxy" - a rough estimate of player ability
+ * based on their debut match statistics. This helps place new players at
+ * appropriate skill levels instead of always starting them at the bottom.
+ *
+ * The skill proxy considers:
+ * - Kill/Death ratio efficiency
+ * - Damage dealt vs damage taken ratio
+ *
+ * @param matchDetail - The player's first match statistics
+ * @returns Skill proxy value (0-2 range, where 1.0 = average skill)
  */
 export function calculateSkillProxy(matchDetail: MatchDetail): number {
-  const kd = matchDetail.frags - matchDetail.deaths;
-  const damageRatio = matchDetail.damageDealt / matchDetail.damageTaken;
+  // Analyze kill efficiency - how well the player traded kills for deaths
+  const kd =
+    matchDetail.deaths > 0
+      ? matchDetail.frags / matchDetail.deaths
+      : matchDetail.frags; // Handle perfect K/D (no deaths)
 
-  // Normalize values to create a composite score
-  const kdScore = Math.max(0, Math.min(kd / 50, 2)); // Normalized between 0-2
-  const damageScore = Math.max(0, Math.min(damageRatio / 3, 2)); // Normalized between 0-2
+  // Normalize K/D around 1.5 as "average good" performance
+  // K/D of 1.5 = skill score of 1.0, higher K/D = higher score
+  const kdScore = Math.max(0, Math.min(2, kd / 1.5));
 
-  // Weighted average (more weight to K/D and damage)
-  const skillProxy = kdScore * 0.5 + damageScore * 0.5;
+  // Analyze damage efficiency - how much damage dealt vs received
+  const damageRatio =
+    matchDetail.damageTaken > 0
+      ? matchDetail.damageDealt / matchDetail.damageTaken
+      : matchDetail.damageDealt / 1000; // Fallback for players who took no damage
 
-  return skillProxy;
+  // Normalize damage ratio around 1.2 as "good" efficiency
+  // Ratio of 1.2 = skill score of 1.0 (dealing 20% more damage than receiving)
+  const damageScore = Math.max(0, Math.min(2, damageRatio / 1.2));
+
+  // Combine metrics with weighted average
+  // K/D gets more weight (60%) as it's more directly related to winning
+  const skillProxy = kdScore * 0.6 + damageScore * 0.4;
+
+  return Number(skillProxy.toFixed(2));
 }
 
 /**
- * Calculates an initial OpenSkill rating for a player based on their skill proxy.
- * @param skillProxy - The player's skill proxy value.
- * @returns Initial Rating object.
+ * Creates an initial OpenSkill rating for a new player based on their skill proxy
+ *
+ * Instead of starting all players at the default rating, this function adjusts
+ * the initial rating based on observed skill in their first match. This helps
+ * reduce the number of unbalanced matches during the "placement" period.
+ *
+ * @param skillProxy - Estimated skill level from first match (0-2 range)
+ * @returns OpenSkill Rating object with appropriate mu and sigma values
  */
 export function calculateInitialRating(skillProxy: number): Rating {
-  // Higher base rating to avoid negative MMRs
-  const baseRating = 18;
-  // Adjustment based on skill proxy: +/-8 points
-  const adjustment = (skillProxy - 1) * 2; // skillProxy between 0-2, adjustment between -2 and +2
+  // OpenSkill default rating is approximately 25 mu (skill estimate)
+  const baseRating = 25;
 
-  const initialMu = Math.max(10, Math.min(25, baseRating + adjustment));
+  // Adjust initial rating based on skill proxy
+  // skillProxy: 0-2 range, where 1.0 = average
+  // Adjustment: -5 to +5 points from base rating
+  const adjustment = (skillProxy - 1) * 5;
 
-  // Higher sigma for new players for lower initial MMRs
-  const initialSigma = 9.5;
+  // Calculate initial mu (skill estimate) with bounds
+  // Range: 15-35 (prevents extreme starting ratings)
+  const initialMu = Math.max(15, Math.min(35, baseRating + adjustment));
+
+  // Use standard OpenSkill uncertainty for new players
+  // Higher sigma means the system is less confident about the rating
+  const initialSigma = 8.333; // OpenSkill default uncertainty
 
   return rating({ mu: initialMu, sigma: initialSigma });
 }
 
 /**
- * Calculates the initial MMR for a player in their first match.
- * @param matchDetail - The player's match detail.
- * @param matchDetails - All match details for the match.
- * @param rating - The player's OpenSkill rating.
- * @param playerPerformance - The player's performance object.
- * @returns Initial MMR value.
+ * Calculates the initial MMR for a player's first match (placement match)
+ *
+ * This function determines where a new player should start in the MMR ladder
+ * based on multiple factors:
+ * - Their OpenSkill rating (skill estimate)
+ * - Their performance in the placement match
+ * - Rating uncertainty (less certain = lower starting MMR)
+ *
+ * The goal is to place new players at appropriate skill levels quickly
+ * while being conservative to avoid overrating beginners.
+ *
+ * @param playerRating - Player's calculated OpenSkill rating
+ * @param playerPerformance - Player's performance metrics
+ * @returns Initial MMR value (0 or higher)
  */
 export function calculateInitialMMR(
-  matchDetail: MatchDetail,
-  matchDetails: MatchDetail[],
-  rating: Rating,
+  playerRating: Rating,
   playerPerformance: PlayerPerformance,
 ): number {
-  // Scaled MMR base value
-  const baseMMR = 250; // System midpoint
+  // Base MMR for new players - middle of the ladder
+  // This represents "average" skill level in the player base
+  const baseMMR = 1000;
 
-  const kd = matchDetail.frags - matchDetail.deaths;
-  const avgDamage =
-    matchDetails.reduce((sum, p) => sum + p.damageDealt, 0) /
-    matchDetails.length;
+  // Convert OpenSkill rating to MMR adjustment
+  // mu = 25 (default) results in no adjustment
+  // Each point above/below default = ±40 MMR adjustment
+  const ratingAdjustment = (playerRating.mu - 25) * 40;
 
-  // Calculate boost based on metrics (max +/-300 points)
-  const kdBoost = Math.max(-20, Math.min(20, (kd - 1.0) * 10)); // K/D above 1.0 gives boost
-  const damageBoost = Math.max(-10, Math.min(10, (avgDamage - 2500) / 200)); // Damage above 2500 gives boost
+  // Performance bonus/penalty based on placement match results
+  // Exceptional performance can add up to 200 MMR to starting rating
+  // Poor performance can subtract up to 200 MMR
+  const performanceBonus = (playerPerformance.score - 1.0) * 200;
 
-  const performanceBoost = kdBoost + damageBoost;
+  // Uncertainty penalty - less certain ratings start lower
+  // Higher sigma (uncertainty) = lower initial MMR
+  // This prevents overconfident placement of potentially weaker players
+  const uncertaintyPenalty = (playerRating.sigma - 8.333) * 20;
 
-  // Convert OpenSkill rating to MMR scale
-  const skillFactor = (rating.mu - 18) * 6; // Each mu point ≈ 6 MMR
-  const uncertaintyPenalty = rating.sigma * 7; // Penalty for uncertainty
+  // Combine all factors to get initial MMR
+  const initialMMR =
+    baseMMR + ratingAdjustment + performanceBonus - uncertaintyPenalty;
 
-  const scaledMMR =
-    baseMMR +
-    skillFactor +
-    performanceBoost -
-    uncertaintyPenalty +
-    playerPerformance.adjustment;
-
-  return Math.max(0, Math.round(scaledMMR));
+  // Ensure MMR is never negative
+  return Math.max(0, Math.round(initialMMR));
 }

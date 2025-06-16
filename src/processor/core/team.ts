@@ -1,7 +1,11 @@
 import { MatchDetail } from 'src/match_details/match-detail.entity';
 
 /**
- * Team utilities for organizing players into teams and determining the match winner.
+ * Team Management Module
+ *
+ * This module provides utilities for organizing players into teams and
+ * determining match outcomes. It handles the basic team-based logic
+ * that the MMR system relies on for calculating rating changes.
  */
 
 /**
