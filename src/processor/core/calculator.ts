@@ -1,6 +1,6 @@
 import { MatchDetail } from 'src/match_details/match-detail.entity';
 import { PlayerPerformance } from '../types/player-performance';
-import { rate, Rating } from 'openskill';
+import { rating, rate, Rating } from 'openskill';
 import {
   calculateIndividualPerformance,
   calculatePerformanceAdjustment,
@@ -11,6 +11,7 @@ import {
   calculateSkillProxy,
 } from './rating';
 import { determineWinner, organizeTeams } from './team';
+import { Player } from 'src/players/player.entity';
 
 /**
  * AGMMRCalculator - Advanced Gaming MMR Calculator
@@ -25,7 +26,21 @@ import { determineWinner, organizeTeams } from './team';
 export class AGMMRCalculator {
   // Cache of all player ratings using OpenSkill Rating objects
   // Key: steamID, Value: Rating (contains mu and sigma values)
-  private playerRatings: Map<string, Rating> = new Map();
+  private _playerRatings: Map<string, Rating> = new Map();
+
+  get playerRatings(): Map<string, Rating> {
+    return this._playerRatings;
+  }
+
+  public ensurePlayerRatings(players: Player[]): void {
+    for (const player of players) {
+      const playerRating = rating({
+        mu: player.skillMu,
+        sigma: player.skillSigma,
+      });
+      this._playerRatings.set(player.steamID, playerRating);
+    }
+  }
 
   /**
    * Processes a complete match and calculates MMR changes for all players
@@ -88,7 +103,7 @@ export class AGMMRCalculator {
         const steamId = match.player.steamID;
         const newRating = newRatings[teamIdx]?.[idx];
         if (newRating) {
-          this.playerRatings.set(steamId, newRating);
+          this._playerRatings.set(steamId, newRating);
         }
       });
     });
@@ -368,12 +383,12 @@ export class AGMMRCalculator {
     steamID: string,
     matchDetail: MatchDetail,
   ): Rating {
-    if (!this.playerRatings.has(steamID)) {
+    if (!this._playerRatings.has(steamID)) {
       // New player - analyze their first match to estimate initial skill
       const skillProxy = calculateSkillProxy(matchDetail);
       const initialRating = calculateInitialRating(skillProxy);
-      this.playerRatings.set(steamID, initialRating);
+      this._playerRatings.set(steamID, initialRating);
     }
-    return this.playerRatings.get(steamID)!;
+    return this._playerRatings.get(steamID)!;
   }
 }

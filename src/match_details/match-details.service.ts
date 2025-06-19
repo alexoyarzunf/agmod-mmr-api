@@ -1,6 +1,6 @@
 import { InjectRepository } from '@nestjs/typeorm';
 import { MatchDetail } from './match-detail.entity';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import {
   CreateMatchDetailDto,
   MatchDetailResponseDto,
@@ -9,8 +9,12 @@ import { Player } from 'src/players/player.entity';
 import { ProcessorService } from 'src/processor/processor.service';
 import { InvalidModelError } from './exceptions/invalid-model.error';
 import { InvalidModelCountError } from './exceptions/invalid-model-count.error';
+import { Injectable, Logger } from '@nestjs/common';
 
+@Injectable()
 export class MatchDetailsService {
+  private readonly logger = new Logger(MatchDetailsService.name);
+
   constructor(
     @InjectRepository(MatchDetail)
     private readonly matchDetailsRepository: Repository<MatchDetail>,
@@ -18,6 +22,13 @@ export class MatchDetailsService {
     private readonly playersRepository: Repository<Player>,
     private readonly processorService: ProcessorService,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    const allPlayers = await this.getAllPlayers();
+    this.processorService.ensurePlayerRatings(allPlayers);
+
+    this.logger.log('Ratings initialized for all players');
+  }
 
   private async getMatchDetail(
     matchDetailId: number,
@@ -39,6 +50,16 @@ export class MatchDetailsService {
       relations: ['player', 'match'],
       order: { id: 'ASC' },
     });
+  }
+
+  private async getPlayers(steamIDs: string[]): Promise<Player[]> {
+    return await this.playersRepository.find({
+      where: { steamID: In(steamIDs) },
+    });
+  }
+
+  private async getAllPlayers(): Promise<Player[]> {
+    return await this.playersRepository.find();
   }
 
   private async getLatestMatchDetail(
@@ -77,6 +98,20 @@ export class MatchDetailsService {
     });
   }
 
+  async updatePlayerRatings(
+    updatedRatings: Map<string, { mu: number; sigma: number }>,
+  ): Promise<void> {
+    for (const [steamID, rating] of updatedRatings.entries()) {
+      await this.playersRepository.update(
+        { steamID },
+        {
+          skillMu: rating.mu,
+          skillSigma: rating.sigma,
+        },
+      );
+    }
+  }
+
   private async updateMatchDetail(
     id: number,
     matchDetail: MatchDetail,
@@ -86,6 +121,17 @@ export class MatchDetailsService {
 
   public async reprocessMatchDetails(): Promise<MatchDetailResponseDto> {
     const matchDetails = await this.getAllMatchDetails();
+
+    const uniqueSteamIDs = [
+      ...new Set(matchDetails.map((md) => md.player.steamID)),
+    ];
+    const allPlayers = await this.getPlayers(uniqueSteamIDs);
+
+    for (const player of allPlayers) {
+      player.skillMu = 25.0;
+      player.skillSigma = 8.333;
+    }
+    this.processorService.ensurePlayerRatings(allPlayers);
 
     const matchDetailsByMatch: Record<number, MatchDetail[]> = {};
     for (const matchDetail of matchDetails) {
@@ -127,6 +173,9 @@ export class MatchDetailsService {
       );
     }
 
+    const finalRatings = this.processorService.getPlayerRatings();
+    await this.updatePlayerRatings(finalRatings);
+
     return { success: true };
   }
   public async createMatchDetails(
@@ -148,7 +197,10 @@ export class MatchDetailsService {
 
     let matchDetails: MatchDetail[] = [];
     const previousMatchDetails: Record<string, MatchDetail | null> = {};
+    const steamIDs: string[] = [];
+
     for (const dto of createMatchDetailsDto) {
+      steamIDs.push(dto.playerSteamId);
       const previousMatchDetail = await this.getLatestMatchDetail(
         dto.playerSteamId,
       );
@@ -163,10 +215,15 @@ export class MatchDetailsService {
       matchDetails.push(matchDetail);
     }
 
+    const players = await this.getPlayers(steamIDs);
+    this.processorService.ensurePlayerRatings(players);
+
     matchDetails = this.processorService.processMatch(
       matchDetails,
       previousMatchDetails,
     );
+
+    const playerRatings = this.processorService.getPlayerRatings();
 
     for (const matchDetail of matchDetails) {
       await this.updateMatchDetail(matchDetail.id, matchDetail);
@@ -175,6 +232,8 @@ export class MatchDetailsService {
         matchDetail.mmrAfterMatch,
       );
     }
+
+    await this.updatePlayerRatings(playerRatings);
 
     return { success: true };
   }
