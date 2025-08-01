@@ -10,6 +10,7 @@ export interface MatchExtendedResponseDto {
   matchDate: Date;
   mapName: string;
   matchDetails: MatchDetailsResponseDto[];
+  isInvalidMatch: boolean;
 }
 
 export interface MatchDetailsResponseDto {

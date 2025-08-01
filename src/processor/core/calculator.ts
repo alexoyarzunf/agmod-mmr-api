@@ -34,11 +34,18 @@ export class AGMMRCalculator {
 
   public ensurePlayerRatings(players: Player[]): void {
     for (const player of players) {
-      const playerRating = rating({
-        mu: player.skillMu,
-        sigma: player.skillSigma,
-      });
+      if (player.skillMu === null || player.skillMu === undefined || isNaN(player.skillMu)) {
+        player.skillMu = 25.0;
+      }
+
+      if (player.skillSigma === null || player.skillSigma === undefined || isNaN(player.skillSigma)) {
+        player.skillSigma = 8.333;
+      }
+
+      const playerRating = rating({ mu: player.skillMu, sigma: player.skillSigma });
       this._playerRatings.set(player.steamID, playerRating);
+
+      player.mmr = Math.round(playerRating.mu * 10);
     }
   }
 
@@ -61,6 +68,44 @@ export class AGMMRCalculator {
     matchDetails: MatchDetail[],
     previousMatchDetails: Record<string, MatchDetail | null>,
   ): MatchDetail[] {
+
+    // Validating "normal" match
+    const totalFrags = matchDetails.reduce((sum, p) => sum + p.frags, 0);
+    const totalDamage = matchDetails.reduce((sum, p) => sum + p.damageDealt, 0);
+    // Know how many players made (damage > 100 & frags > 1)
+    const activePlayers = matchDetails.filter(p => p.frags >= 1 && p.damageDealt >= 100).length;
+    // Detect invalid match
+    const isInvalidMatch = totalFrags < 10 || totalDamage < 1000 || activePlayers < 2;
+
+    const MIN_FRAGS = 10;
+    const MIN_DAMAGE = 1000;
+    const MIN_ACTIVE_PLAYERS = 1;
+
+    if (totalFrags < MIN_FRAGS || totalDamage < MIN_DAMAGE || activePlayers < MIN_ACTIVE_PLAYERS) {
+      const matchId = matchDetails[0]?.match?.id ?? 'desconocido';
+      console.log(
+        `⚠️ Partida ignorada por baja actividad (matchId=${matchId}): frags=${totalFrags}, daño=${totalDamage}, jugadores activos=${activePlayers}`
+      );
+      // Convert final skillMu into visible MMR for each player (debugging/future DB save)
+      for (const match of matchDetails) {
+        const steamID = match.player.steamID;
+        const finalRating = this._playerRatings.get(steamID);
+        if (finalRating) {
+          match.player.skillMu = finalRating.mu;
+          match.player.skillSigma = finalRating.sigma;
+          match.player.mmr = Math.round(finalRating.mu * 10);
+        }
+      }
+      // Avoid reset MMR to 0
+      return matchDetails.map((p) => {
+        const steamID = p.player.steamID;
+        const previousMMR = previousMatchDetails?.[steamID]?.mmrAfterMatch ?? 1000;
+        p.mmrDelta = 0;
+        p.mmrAfterMatch = previousMMR;
+        return p;
+      });
+    }
+
     // Separate players into their respective teams based on model color
     const { blueTeam, redTeam } = organizeTeams(matchDetails);
 
@@ -383,12 +428,23 @@ export class AGMMRCalculator {
     steamID: string,
     matchDetail: MatchDetail,
   ): Rating {
-    if (!this._playerRatings.has(steamID)) {
-      // New player - analyze their first match to estimate initial skill
+    let existingRating = this._playerRatings.get(steamID);
+
+    if (!existingRating || isNaN(existingRating.mu) || isNaN(existingRating.sigma)) {
       const skillProxy = calculateSkillProxy(matchDetail);
       const initialRating = calculateInitialRating(skillProxy);
-      this._playerRatings.set(steamID, initialRating);
+
+      // Fallback de seguridad si initialRating no es válido
+      const safeRating = rating({
+        mu: isNaN(initialRating.mu) ? 25.0 : initialRating.mu,
+        sigma: isNaN(initialRating.sigma) ? 8.333 : initialRating.sigma,
+      });
+
+      this._playerRatings.set(steamID, safeRating);
+      return safeRating;
     }
-    return this._playerRatings.get(steamID)!;
+
+    return existingRating;
   }
+
 }
