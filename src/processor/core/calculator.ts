@@ -69,13 +69,9 @@ export class AGMMRCalculator {
     previousMatchDetails: Record<string, MatchDetail | null>,
   ): MatchDetail[] {
 
-    // Validating "normal" match
     const totalFrags = matchDetails.reduce((sum, p) => sum + p.frags, 0);
     const totalDamage = matchDetails.reduce((sum, p) => sum + p.damageDealt, 0);
-    // Know how many players made (damage > 100 & frags > 1)
     const activePlayers = matchDetails.filter(p => p.frags >= 1 && p.damageDealt >= 100).length;
-    // Detect invalid match
-    const isInvalidMatch = totalFrags < 10 || totalDamage < 1000 || activePlayers < 2;
 
     const MIN_FRAGS = 10;
     const MIN_DAMAGE = 1000;
@@ -86,7 +82,6 @@ export class AGMMRCalculator {
       console.log(
         `⚠️ Partida ignorada por baja actividad (matchId=${matchId}): frags=${totalFrags}, daño=${totalDamage}, jugadores activos=${activePlayers}`
       );
-      // Convert final skillMu into visible MMR for each player (debugging/future DB save)
       for (const match of matchDetails) {
         const steamID = match.player.steamID;
         const finalRating = this._playerRatings.get(steamID);
@@ -96,7 +91,6 @@ export class AGMMRCalculator {
           match.player.mmr = Math.round(finalRating.mu * 10);
         }
       }
-      // Avoid reset MMR to 0
       return matchDetails.map((p) => {
         const steamID = p.player.steamID;
         const previousMMR = previousMatchDetails?.[steamID]?.mmrAfterMatch ?? 1000;
@@ -434,7 +428,6 @@ export class AGMMRCalculator {
       const skillProxy = calculateSkillProxy(matchDetail);
       const initialRating = calculateInitialRating(skillProxy);
 
-      // Fallback de seguridad si initialRating no es válido
       const safeRating = rating({
         mu: isNaN(initialRating.mu) ? 25.0 : initialRating.mu,
         sigma: isNaN(initialRating.sigma) ? 8.333 : initialRating.sigma,

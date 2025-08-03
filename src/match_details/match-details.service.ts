@@ -226,13 +226,12 @@ export class MatchDetailsService {
     const playerRatings = this.processorService.getPlayerRatings();
 
     for (const matchDetail of matchDetails) {
-      // Skip invalid matches
       const isValidMatch =
         matchDetail.mmrAfterMatch !== 0 ||
         Math.abs(matchDetail.mmrDelta) > 0;
 
       if (!isValidMatch) {
-        continue; // Avoid MMR update
+        continue;
       }
 
       await this.updateMatchDetail(matchDetail.id, matchDetail);

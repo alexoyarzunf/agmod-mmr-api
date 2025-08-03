@@ -45,7 +45,6 @@ export class MatchesService {
       mmrDelta: detail.mmrDelta,
     }));
 
-    // Logic to detect if the match is invalid
     const totalFrags = matchDetails.reduce((sum, p) => sum + p.frags, 0);
     const totalDamage = matchDetails.reduce((sum, p) => sum + p.damageDealt, 0);
     const activePlayers = matchDetails.filter(p => p.frags > 0 || p.damageDealt > 0).length;
