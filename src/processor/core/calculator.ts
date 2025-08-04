@@ -163,61 +163,46 @@ export class AGMMRCalculator {
         const performance = playerPerformances.get(steamId)!;
 
         let mmrAfterMatch: number;
-        let mmrDelta: number;
 
-        if (isFirstMatch) {
-          // Special handling for new players - use placement match logic
-          mmrAfterMatch = calculateInitialMMR(newRating, performance);
-          mmrDelta = mmrAfterMatch;
-        } else {
-          // Standard MMR calculation for established players
+        const baseMMR = 1000;
+        const playerPreviousMMR = isFirstMatch ? baseMMR : previousMMR;
 
-          // Base MMR change from OpenSkill rating adjustment
-          const baseMMRChange = this.convertRatingChangeToMMR(
-            oldRating,
-            newRating,
-          );
+        const baseMMRChange = this.convertRatingChangeToMMR(
+          oldRating,
+          newRating,
+        );
 
-          // Performance-based adjustment (rewards individual play)
-          const performanceAdjustment = calculatePerformanceAdjustment(
-            performance,
-            isWinner,
-            team.length,
-          );
+        const performanceAdjustment = calculatePerformanceAdjustment(
+          performance,
+          isWinner,
+          team.length,
+        );
 
-          // Balance factor adjusts MMR changes based on expected vs actual outcomes
-          // Upsets (weaker team winning) result in larger MMR swings
-          const balanceFactor = this.calculateBalanceFactor(
-            skillDifference,
-            isWinner,
-            teamIdx === 0 ? blueAvgSkill : redAvgSkill,
-            teamIdx === 0 ? redAvgSkill : blueAvgSkill,
-          );
+        const balanceFactor = this.calculateBalanceFactor(
+          skillDifference,
+          isWinner,
+          teamIdx === 0 ? blueAvgSkill : redAvgSkill,
+          teamIdx === 0 ? redAvgSkill : blueAvgSkill,
+        );
 
-          // Carry adjustment rewards players who outperform teammates
-          // or penalizes players who get carried by better teammates
-          const carryAdjustment = this.calculateCarryAdjustment(
-            match,
-            team,
-            performance,
-            isWinner,
-          );
+        const carryAdjustment = this.calculateCarryAdjustment(
+          match,
+          team,
+          performance,
+          isWinner,
+        );
 
-          // Store total adjustment for debugging/transparency
-          performance.adjustment = performanceAdjustment + carryAdjustment;
+        performance.adjustment = performanceAdjustment + carryAdjustment;
 
-          // Combine all factors to get final MMR change
-          mmrDelta = Math.round(
-            (baseMMRChange + performanceAdjustment + carryAdjustment) *
-              balanceFactor,
-          );
+        let mmrDelta = Math.round(
+          (baseMMRChange + performanceAdjustment + carryAdjustment) *
+            balanceFactor,
+        );
 
-          // Apply bounds to prevent extreme MMR changes and ensure minimum movement
-          mmrDelta = this.clampMMRDelta(mmrDelta, isWinner);
-          mmrAfterMatch = Math.max(0, previousMMR + mmrDelta);
-        }
+        mmrDelta = this.clampMMRDelta(mmrDelta, isWinner);
 
-        // Update the match detail with calculated MMR values
+        mmrAfterMatch = Math.max(0, playerPreviousMMR + mmrDelta);
+
         match.mmrAfterMatch = mmrAfterMatch;
         match.mmrDelta = mmrDelta;
       });

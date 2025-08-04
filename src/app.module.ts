@@ -16,7 +16,7 @@ import { MatchDetailsModule } from './match_details/match-details.module';
         DB_HOST: Joi.string().required(),
         DB_PORT: Joi.number().required(),
         DB_USERNAME: Joi.string().required(),
-        DB_PASSWORD: Joi.string().required(),
+        DB_PASSWORD: Joi.string().allow('').required(),
         DB_DATABASE: Joi.string().required(),
         DB_SYNCHRONIZE: Joi.boolean().required(),
       }),
