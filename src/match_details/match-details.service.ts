@@ -182,6 +182,7 @@ export class MatchDetailsService {
     createMatchDetailsDto: CreateMatchDetailDto[],
   ): Promise<MatchDetailResponseDto> {
     const teams: Record<string, number> = {};
+
     for (const dto of createMatchDetailsDto) {
       const model = dto.model?.toLowerCase();
       if (model !== 'blue' && model !== 'red') {
@@ -189,28 +190,25 @@ export class MatchDetailsService {
       }
       teams[model] = (teams[model] ?? 0) + 1;
     }
-    const teamSizes = Object.values(teams);
 
+    const teamSizes = Object.values(teams);
     if (teamSizes.length !== 2 || teamSizes[0] !== teamSizes[1]) {
       throw new InvalidModelCountError();
     }
 
-    let matchDetails: MatchDetail[] = [];
     const previousMatchDetails: Record<string, MatchDetail | null> = {};
     const steamIDs: string[] = [];
 
+    let matchDetails: MatchDetail[] = [];
+
     for (const dto of createMatchDetailsDto) {
       steamIDs.push(dto.playerSteamId);
-      const previousMatchDetail = await this.getLatestMatchDetail(
-        dto.playerSteamId,
-      );
+
+      const previousMatchDetail = await this.getLatestMatchDetail(dto.playerSteamId);
       previousMatchDetails[dto.playerSteamId] = previousMatchDetail;
 
       const createdMatchDetail = await this.createMatchDetail(dto);
-      const matchDetail = await this.getMatchDetail(
-        createdMatchDetail.id,
-        dto.playerSteamId,
-      );
+      const matchDetail = await this.getMatchDetail(createdMatchDetail.id, dto.playerSteamId);
 
       matchDetails.push(matchDetail);
     }
@@ -218,31 +216,16 @@ export class MatchDetailsService {
     const players = await this.getPlayers(steamIDs);
     this.processorService.ensurePlayerRatings(players);
 
-    matchDetails = this.processorService.processMatch(
-      matchDetails,
-      previousMatchDetails,
-    );
-
-    const playerRatings = this.processorService.getPlayerRatings();
+    matchDetails = this.processorService.processMatch(matchDetails, previousMatchDetails);
 
     for (const matchDetail of matchDetails) {
-      const isValidMatch =
-        matchDetail.mmrAfterMatch !== 0 ||
-        Math.abs(matchDetail.mmrDelta) > 0;
-
-      if (!isValidMatch) {
-        continue;
-      }
-
       await this.updateMatchDetail(matchDetail.id, matchDetail);
-      await this.updatePlayerMMR(
-        matchDetail.player.steamID,
-        matchDetail.mmrAfterMatch,
-      );
     }
 
+    const playerRatings = this.processorService.getPlayerRatings();
     await this.updatePlayerRatings(playerRatings);
 
     return { success: true };
   }
+
 }

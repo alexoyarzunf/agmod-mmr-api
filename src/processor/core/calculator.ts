@@ -42,7 +42,11 @@ export class AGMMRCalculator {
         player.skillSigma = 8.333;
       }
 
-      const playerRating = rating({ mu: player.skillMu, sigma: player.skillSigma });
+      const playerRating = rating({
+        mu: parseFloat(player.skillMu as any),
+        sigma: parseFloat(player.skillSigma as any),
+      });
+
       this._playerRatings.set(player.steamID, playerRating);
 
       player.mmr = Math.round(playerRating.mu * 10);
@@ -79,9 +83,6 @@ export class AGMMRCalculator {
 
     if (totalFrags < MIN_FRAGS || totalDamage < MIN_DAMAGE || activePlayers < MIN_ACTIVE_PLAYERS) {
       const matchId = matchDetails[0]?.match?.id ?? 'desconocido';
-      console.log(
-        `⚠️ Partida ignorada por baja actividad (matchId=${matchId}): frags=${totalFrags}, daño=${totalDamage}, jugadores activos=${activePlayers}`
-      );
       for (const match of matchDetails) {
         const steamID = match.player.steamID;
         const finalRating = this._playerRatings.get(steamID);
@@ -100,11 +101,8 @@ export class AGMMRCalculator {
       });
     }
 
-    // Separate players into their respective teams based on model color
     const { blueTeam, redTeam } = organizeTeams(matchDetails);
 
-    // Retrieve current OpenSkill ratings for all players on both teams
-    // Creates initial ratings for new players based on their first match performance
     const blueRatings = blueTeam.map((match) =>
       this.getOrCreatePlayerRating(match.player.steamID, match),
     );
@@ -112,42 +110,33 @@ export class AGMMRCalculator {
       this.getOrCreatePlayerRating(match.player.steamID, match),
     );
 
-    // Calculate average skill level for each team to determine balance
-    // Used later for upset detection and MMR adjustment scaling
     const blueAvgSkill = this.calculateTeamSkill(blueRatings);
     const redAvgSkill = this.calculateTeamSkill(redRatings);
     const skillDifference = Math.abs(blueAvgSkill - redAvgSkill);
 
-    // Determine which team won based on total frags/kills
     const winner = determineWinner(blueTeam, redTeam);
 
-    // Analyze individual player performance relative to match averages
-    // This creates performance scores that account for K/D, damage, and efficiency
     const playerPerformances = new Map<string, PlayerPerformance>();
     matchDetails.forEach((player) => {
       const performance = calculateIndividualPerformance(player, matchDetails);
       playerPerformances.set(player.player.steamID, performance);
     });
 
-    // Update OpenSkill ratings based on match outcome
-    // OpenSkill uses Bayesian inference to update player skill estimates
     const newRatings =
       winner === 'blue'
-        ? rate([blueRatings, redRatings], { rank: [1, 2] }) // Blue wins (rank 1)
-        : rate([blueRatings, redRatings], { rank: [2, 1] }); // Red wins (rank 1)
+        ? rate([blueRatings, redRatings], { rank: [1, 2] })
+        : rate([blueRatings, redRatings], { rank: [2, 1] });
 
-    // Cache the updated ratings for future matches
     [blueTeam, redTeam].forEach((team, teamIdx) => {
       team.forEach((match, idx) => {
         const steamId = match.player.steamID;
         const newRating = newRatings[teamIdx]?.[idx];
-        if (newRating) {
+        if (newRating && !isNaN(newRating.mu) && !isNaN(newRating.sigma)) {
           this._playerRatings.set(steamId, newRating);
         }
       });
     });
 
-    // Convert OpenSkill rating changes to MMR point changes with various adjustments
     [blueTeam, redTeam].forEach((team, teamIdx) => {
       team.forEach((match, idx) => {
         const steamId = match.player.steamID;
@@ -162,46 +151,41 @@ export class AGMMRCalculator {
         const newRating = newRatings[teamIdx]?.[idx];
         const performance = playerPerformances.get(steamId)!;
 
-        let mmrAfterMatch: number;
-
         const baseMMR = 1000;
         const playerPreviousMMR = isFirstMatch ? baseMMR : previousMMR;
 
-        const baseMMRChange = this.convertRatingChangeToMMR(
-          oldRating,
-          newRating,
-        );
-
-        const performanceAdjustment = calculatePerformanceAdjustment(
-          performance,
-          isWinner,
-          team.length,
-        );
-
+        const baseMMRChange = this.convertRatingChangeToMMR(oldRating, newRating);
+        const performanceAdjustment = calculatePerformanceAdjustment(performance, isWinner, team.length);
         const balanceFactor = this.calculateBalanceFactor(
           skillDifference,
           isWinner,
           teamIdx === 0 ? blueAvgSkill : redAvgSkill,
           teamIdx === 0 ? redAvgSkill : blueAvgSkill,
         );
-
-        const carryAdjustment = this.calculateCarryAdjustment(
-          match,
-          team,
-          performance,
-          isWinner,
-        );
+        const carryAdjustment = this.calculateCarryAdjustment(match, team, performance, isWinner);
 
         performance.adjustment = performanceAdjustment + carryAdjustment;
 
-        let mmrDelta = Math.round(
-          (baseMMRChange + performanceAdjustment + carryAdjustment) *
-            balanceFactor,
-        );
+        let mmrDelta: number;
+        let mmrAfterMatch: number;
 
-        mmrDelta = this.clampMMRDelta(mmrDelta, isWinner);
+        if (
+          isNaN(baseMMRChange) ||
+          isNaN(performanceAdjustment) ||
+          isNaN(carryAdjustment) ||
+          isNaN(balanceFactor)
+        ) {
 
-        mmrAfterMatch = Math.max(0, playerPreviousMMR + mmrDelta);
+          mmrDelta = 0;
+          mmrAfterMatch = playerPreviousMMR;
+        } else {
+          mmrDelta = Math.round(
+            (baseMMRChange + performanceAdjustment + carryAdjustment) * balanceFactor
+          );
+
+          mmrDelta = this.clampMMRDelta(mmrDelta, isWinner);
+          mmrAfterMatch = Math.max(0, playerPreviousMMR + mmrDelta);
+        }
 
         match.mmrAfterMatch = mmrAfterMatch;
         match.mmrDelta = mmrDelta;
@@ -305,15 +289,27 @@ export class AGMMRCalculator {
     oldRating: Rating,
     newRating: Rating,
   ): number {
+    if (
+      !oldRating || !newRating ||
+      typeof oldRating.mu !== 'number' || typeof newRating.mu !== 'number' ||
+      typeof oldRating.sigma !== 'number' || typeof newRating.sigma !== 'number' ||
+      isNaN(oldRating.mu) || isNaN(newRating.mu) ||
+      isNaN(oldRating.sigma) || isNaN(newRating.sigma)
+    ) {
+      console.warn('⚠️ convertRatingChangeToMMR recibió valores inválidos:', {
+        oldRating,
+        newRating,
+      });
+      return 0; // No aplicar cambio si los valores no son válidos
+    }
+
     // Primary factor: change in skill estimate (mu)
     const muChange = newRating.mu - oldRating.mu;
 
     // Secondary factor: reduction in uncertainty (sigma) is rewarded
-    // As players play more matches, their rating becomes more certain
     const sigmaReduction = Math.max(0, oldRating.sigma - newRating.sigma);
 
-    // Convert to MMR points with conservative multipliers for stability
-    // Reduced multiplier (5 instead of 8) prevents volatile MMR swings
+    // Convert to MMR points with conservative multipliers
     return muChange * 5 + sigmaReduction * 1.5;
   }
 
