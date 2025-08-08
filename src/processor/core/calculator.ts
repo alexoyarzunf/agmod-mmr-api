@@ -5,6 +5,11 @@ import {
   calculateIndividualPerformance,
   calculatePerformanceAdjustment,
 } from './performance';
+import {
+  calculateInitialMMR,
+  calculateInitialRating,
+  calculateSkillProxy,
+} from './rating';
 import { determineWinner, organizeTeams } from './team';
 import { Player } from 'src/players/player.entity';
 
@@ -98,29 +103,25 @@ export class AGMMRCalculator {
 
     const { blueTeam, redTeam } = organizeTeams(matchDetails);
 
-    // Retrieve current OpenSkill ratings for all players on both teams
     const blueRatings = blueTeam.map((match) =>
-      this.getOrCreatePlayerRating(match.player.steamID),
+      this.getOrCreatePlayerRating(match.player.steamID, match),
     );
     const redRatings = redTeam.map((match) =>
-      this.getOrCreatePlayerRating(match.player.steamID),
+      this.getOrCreatePlayerRating(match.player.steamID, match),
     );
 
-    // Calculate average skill level for each team to determine balance
     const blueAvgSkill = this.calculateTeamSkill(blueRatings);
     const redAvgSkill = this.calculateTeamSkill(redRatings);
     const skillDifference = Math.abs(blueAvgSkill - redAvgSkill);
 
     const winner = determineWinner(blueTeam, redTeam);
 
-    // Analyze individual player performance relative to match averages
     const playerPerformances = new Map<string, PlayerPerformance>();
     matchDetails.forEach((player) => {
       const performance = calculateIndividualPerformance(player, matchDetails);
       playerPerformances.set(player.player.steamID, performance);
     });
 
-    // Update OpenSkill ratings based on match outcome
     const newRatings =
       winner === 'blue'
         ? rate([blueRatings, redRatings], { rank: [1, 2] })
@@ -141,11 +142,7 @@ export class AGMMRCalculator {
         const steamId = match.player.steamID;
         const previousMatchDetail = previousMatchDetails[steamId];
         const isFirstMatch = previousMatchDetail === null;
-
-        const previousMMR = isFirstMatch
-          ? 1000
-          : previousMatchDetail.mmrAfterMatch;
-
+        const previousMMR = previousMatchDetail?.mmrAfterMatch ?? 0;
         const isWinner =
           (winner === 'blue' && teamIdx === 0) ||
           (winner === 'red' && teamIdx === 1);
@@ -154,50 +151,44 @@ export class AGMMRCalculator {
         const newRating = newRatings[teamIdx]?.[idx];
         const performance = playerPerformances.get(steamId)!;
 
-        // Base MMR change from OpenSkill rating adjustment
-        const baseMMRChange = this.convertRatingChangeToMMR(
-          oldRating,
-          newRating,
-        );
+        const baseMMR = 1000;
+        const playerPreviousMMR = isFirstMatch ? baseMMR : previousMMR;
 
-        // Performance-based adjustment (rewards individual play)
-        const performanceAdjustment = calculatePerformanceAdjustment(
-          performance,
-          isWinner,
-          team.length,
-        );
-
-        // Balance factor adjusts MMR changes based on expected vs actual outcomes
+        const baseMMRChange = this.convertRatingChangeToMMR(oldRating, newRating);
+        const performanceAdjustment = calculatePerformanceAdjustment(performance, isWinner, team.length);
         const balanceFactor = this.calculateBalanceFactor(
           skillDifference,
           isWinner,
           teamIdx === 0 ? blueAvgSkill : redAvgSkill,
           teamIdx === 0 ? redAvgSkill : blueAvgSkill,
         );
+        const carryAdjustment = this.calculateCarryAdjustment(match, team, performance, isWinner);
 
-        // Carry adjustment rewards players who outperform teammates
-        const carryAdjustment = this.calculateCarryAdjustment(
-          match,
-          team,
-          performance,
-          isWinner,
-        );
-
-        // Store total adjustment for debugging/transparency
         performance.adjustment = performanceAdjustment + carryAdjustment;
 
-        // Combine all factors to get final MMR change
-        const mmrDelta = Math.round(
-          (baseMMRChange + performanceAdjustment + carryAdjustment) *
-            balanceFactor,
-        );
+        let mmrDelta: number;
+        let mmrAfterMatch: number;
 
-        // Apply bounds to prevent extreme MMR changes and ensure minimum movement
-        const clampedMMRDelta = this.clampMMRDelta(mmrDelta, isWinner);
-        const mmrAfterMatch = Math.max(0, previousMMR + clampedMMRDelta);
+        if (
+          isNaN(baseMMRChange) ||
+          isNaN(performanceAdjustment) ||
+          isNaN(carryAdjustment) ||
+          isNaN(balanceFactor)
+        ) {
+
+          mmrDelta = 0;
+          mmrAfterMatch = playerPreviousMMR;
+        } else {
+          mmrDelta = Math.round(
+            (baseMMRChange + performanceAdjustment + carryAdjustment) * balanceFactor
+          );
+
+          mmrDelta = this.clampMMRDelta(mmrDelta, isWinner);
+          mmrAfterMatch = Math.max(0, playerPreviousMMR + mmrDelta);
+        }
 
         match.mmrAfterMatch = mmrAfterMatch;
-        match.mmrDelta = isFirstMatch ? mmrAfterMatch : clampedMMRDelta;
+        match.mmrDelta = mmrDelta;
       });
     });
 
@@ -401,15 +392,30 @@ export class AGMMRCalculator {
   /**
    * Retrieves existing player rating or creates initial rating for new players
    *
-   * All new players start with standard OpenSkill defaults.
+   * For new players, calculates a skill proxy based on their first match
+   * performance and creates an appropriate starting OpenSkill rating.
    *
    * @param steamID - Unique player identifier
+   * @param matchDetail - Player's match data (used for initial rating if new)
    * @returns OpenSkill Rating object for the player
    */
-  private getOrCreatePlayerRating(steamID: string): Rating {
-    if (!this._playerRatings.has(steamID)) {
-      const initialRating = rating({ mu: 25.0, sigma: 8.333 });
-      this._playerRatings.set(steamID, initialRating);
+  private getOrCreatePlayerRating(
+    steamID: string,
+    matchDetail: MatchDetail,
+  ): Rating {
+    let existingRating = this._playerRatings.get(steamID);
+
+    if (!existingRating || isNaN(existingRating.mu) || isNaN(existingRating.sigma)) {
+      const skillProxy = calculateSkillProxy(matchDetail);
+      const initialRating = calculateInitialRating(skillProxy);
+
+      const safeRating = rating({
+        mu: isNaN(initialRating.mu) ? 25.0 : initialRating.mu,
+        sigma: isNaN(initialRating.sigma) ? 8.333 : initialRating.sigma,
+      });
+
+      this._playerRatings.set(steamID, safeRating);
+      return safeRating;
     }
 
     return existingRating;
